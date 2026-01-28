@@ -1,87 +1,57 @@
 from pathlib import Path
 import pandas as pd
 
-# -------------------------------------------------
-# PATH
-# -------------------------------------------------
+# ---------------- PATH ----------------
 BASE_DIR = Path(__file__).resolve().parent
 DATA_PATH = BASE_DIR / "data" / "odi_wc2023_players_stats_2019_2023.csv"
 
-# -------------------------------------------------
-# DOMAIN KNOWLEDGE
-# -------------------------------------------------
+# ---------------- CAPTAIN POOL ----------------
 CAPTAIN_POOL = {
     "virat kohli",
     "rohit sharma",
     "kane williamson",
-    "pat cummins",
     "babar azam",
     "jos buttler",
+    "pat cummins",
     "temba bavuma",
     "dasun shanaka"
 }
 
-WICKETKEEPERS = {
-    "quinton de kock",
-    "jos buttler",
-    "kl rahul",
-    "mushfiqur rahim",
-    "ishan kishan",
-    "liton das",
-    "mohammad rizwan",
-    "tom latham"
-}
-
-ELITE_BOWLERS = {
-    "jasprit bumrah",
-    "trent boult",
-    "mitchell starc"
-}
-
-# -------------------------------------------------
-# LOAD DATA
-# -------------------------------------------------
+# ---------------- LOAD DATA ----------------
 def load_data():
-    if not DATA_PATH.exists():
-        raise FileNotFoundError(f"Dataset not found: {DATA_PATH}")
-
     df = pd.read_csv(DATA_PATH, sep="\t")
+
     df.columns = df.columns.str.strip()
 
-    df["player_clean"] = df["player_clean"].astype(str).str.lower().str.strip()
+    df["player_clean"] = df["player_clean"].str.lower().str.strip()
     df["player"] = df["player_clean"].str.title()
 
     df["final_role"] = (
-        df["role"].astype(str).str.lower()
+        df["role"].str.lower()
         .replace({
             "batter": "batsman",
             "all-rounder": "allrounder",
             "all rounder": "allrounder",
             "utility": "allrounder",
             "wk": "wicketkeeper",
-            "wicket-keeper": "wicketkeeper"
         })
     )
 
-    # 🔥 FORCE WICKETKEEPERS (FIX)
-    df.loc[
-        df["player_clean"].isin(WICKETKEEPERS),
-        "final_role"
-    ] = "wicketkeeper"
+    numeric_cols = [
+        "runs", "wickets", "bat_avg",
+        "strike_rate", "economy",
+        "matches_batted"
+    ]
 
-    for col in [
-        "runs", "wickets", "bat_avg", "strike_rate",
-        "economy", "matches_batted"
-    ]:
+    for col in numeric_cols:
         if col not in df.columns:
             df[col] = 0
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
     return df
 
-# -------------------------------------------------
-# FORM SCORE (SELECTION ONLY)
-# -------------------------------------------------
+
+# ---------------- FORM SCORE ----------------
 def form_score(r, pitch):
     score = (
         r["runs"] * 0.02 +
@@ -98,70 +68,69 @@ def form_score(r, pitch):
 
     return round(score, 2)
 
-# -------------------------------------------------
-# CAPTAIN SELECTION (NO BOWLERS)
-# -------------------------------------------------
+
+# ---------------- CAPTAIN SELECTION ----------------
 def choose_captain(xi):
     eligible = xi[
-        xi["final_role"].isin(["batsman", "wicketkeeper", "allrounder"])
+        (xi["final_role"].isin(["batsman", "wicketkeeper", "allrounder"])) &
+        (xi["player_clean"].isin(CAPTAIN_POOL))
     ].copy()
 
-    def cap_score(r):
-        return (
-            r["matches_batted"] * 1.5 +
-            r["bat_avg"] * 2 +
-            r["runs"] * 0.01
-        )
+    eligible["cap_score"] = (
+        eligible["matches_batted"] * 1.5 +
+        eligible["bat_avg"] * 2 +
+        eligible["runs"] * 0.01
+    )
 
-    trained = eligible[
-        eligible["player_clean"].isin(CAPTAIN_POOL)
-    ].copy()
+    eligible = eligible.sort_values("cap_score", ascending=False)
 
-    pool = trained if not trained.empty else eligible
-    pool["cap_score"] = pool.apply(cap_score, axis=1)
-    pool = pool.sort_values("cap_score", ascending=False)
+    captain = eligible.iloc[0]["player"]
+    vice = eligible.iloc[1]["player"] if len(eligible) > 1 else None
 
-    captain = pool.iloc[0]["player"]
-    vice = pool.iloc[1]["player"] if len(pool) > 1 else None
     return captain, vice
 
-# -------------------------------------------------
-# AUTO BEST XI
-# -------------------------------------------------
-def auto_best_xi(pitch_type="neutral", opponent=None):
+
+# ---------------- AUTO BEST XI ----------------
+def auto_best_xi(pitch_type="neutral", opponent=None, venue=None):
     df = load_data()
+
+    if df.empty:
+        raise ValueError("Dataset is empty")
 
     # Opponent filter
     if opponent:
         df = df[df["country"].str.lower() != opponent.lower()]
 
-    # Elite bowler bias
-    df.loc[
-        df["player_clean"].isin(ELITE_BOWLERS),
-        "wickets"
-    ] *= 1.15
+    if df.empty:
+        raise ValueError("No players left after opponent filtering")
 
+    # Elite bowler bias (Bumrah fix)
+    elite_bowlers = {"jasprit bumrah", "trent boult", "mitchell starc"}
+    df.loc[df["player_clean"].isin(elite_bowlers), "wickets"] *= 1.1
+
+    # Score
     df["score"] = df.apply(lambda r: form_score(r, pitch_type), axis=1)
 
-    # -------- ROLE SELECTION --------
+    # Role balance (FIXED)
     batsmen = df[df["final_role"] == "batsman"].nlargest(5, "score")
     wicketkeeper = df[df["final_role"] == "wicketkeeper"].nlargest(1, "score")
     allrounders = df[df["final_role"] == "allrounder"].nlargest(2, "score")
     bowlers = df[df["final_role"] == "bowler"].nlargest(3, "score")
 
-    xi = pd.concat([
-        batsmen,
-        wicketkeeper,
-        allrounders,
-        bowlers
-    ]).drop_duplicates("player_clean").head(11)
+    # Ensure WK exists
+    if wicketkeeper.empty:
+        wk_fallback = batsmen.head(1).copy()
+        wk_fallback["final_role"] = "wicketkeeper"
+        wicketkeeper = wk_fallback
+
+    xi = pd.concat([batsmen, wicketkeeper, allrounders, bowlers])
+    xi = xi.drop_duplicates("player_clean").head(11)
 
     # Safety fill
     if len(xi) < 11:
         remaining = df[~df["player_clean"].isin(xi["player_clean"])]
         xi = pd.concat([xi, remaining.nlargest(11 - len(xi), "score")])
 
-    # Captain
     captain, vice = choose_captain(xi)
 
     role_order = {
