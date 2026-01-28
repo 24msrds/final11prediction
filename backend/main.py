@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from selector import auto_best_xi
 
+
 app = FastAPI()
 
 @app.get("/best-xi")
