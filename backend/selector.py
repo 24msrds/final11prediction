@@ -1,47 +1,51 @@
-# Render deploy fix
-from pathlib import Path
 import pandas as pd
+from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_PATH = BASE_DIR / "data" / "odi_wc2023_players_stats_2019_2023.csv"
 
 def auto_best_xi(pitch_type="neutral", opponent=None, venue=None):
-    df = pd.read_csv(DATA_PATH, sep="\t")
+    try:
+        df = pd.read_csv(DATA_PATH)
 
-    df.columns = df.columns.str.strip()
-    df["player"] = df["player"].astype(str)
-    df["country"] = df["country"].astype(str)
-    df["role"] = df["role"].str.lower()
+        # Normalize column names
+        df.columns = df.columns.str.lower().str.strip()
 
-    if opponent:
-        df = df[df["country"].str.lower() != opponent.lower()]
+        REQUIRED_COLS = {"player", "role", "runs", "wickets", "country"}
+        if not REQUIRED_COLS.issubset(df.columns):
+            return {
+                "error": "CSV missing required columns",
+                "found": list(df.columns)
+            }
 
-    # basic score
-    df["score"] = (
-        df.get("runs", 0) * 0.02 +
-        df.get("wickets", 0) * 25
-    )
+        # Clean text fields
+        df["player"] = df["player"].astype(str).str.strip()
+        df["role"] = df["role"].str.lower().str.strip()
+        df["country"] = df["country"].astype(str).str.strip()
 
-    batsmen = df[df["role"].isin(["batsman", "batter"])].nlargest(5, "score")
-    allrounders = df[df["role"].isin(["allrounder"])].nlargest(2, "score")
-    bowlers = df[df["role"].isin(["bowler"])].nlargest(4, "score")
+        # Optional opponent filter
+        if opponent:
+            df = df[df["country"].str.lower() != opponent.lower()]
 
-    xi = pd.concat([batsmen, allrounders, bowlers]).head(11)
+        if df.empty:
+            return {"error": "No players found after filtering"}
 
-    captain = xi.sort_values("score", ascending=False).iloc[0]["player"]
+        # Simple role-based selection
+        batsmen = df[df["role"] == "batsman"].nlargest(5, "runs")
+        allrounders = df[df["role"] == "allrounder"].nlargest(2, "runs")
+        bowlers = df[df["role"] == "bowler"].nlargest(4, "wickets")
 
-    result = []
-    for _, r in xi.iterrows():
-        result.append({
-            "player": r["player"],
-            "role": r["role"],
-            "country": r["country"],
-            "runs": int(r.get("runs", 0)),
-            "sr": float(r.get("strike_rate", 0)),
-            "wickets": int(r.get("wickets", 0)),
-            "economy": float(r.get("economy", 0)),
-            "captain": r["player"] == captain,
-            "vice_captain": False
-        })
+        final_xi = pd.concat([batsmen, allrounders, bowlers]).head(11)
 
-    return result
+        return {
+            "count": len(final_xi),
+            "players": final_xi[[
+                "player", "role", "country", "runs", "wickets"
+            ]].to_dict(orient="records")
+        }
+
+    except Exception as e:
+        return {
+            "error": "Internal selector error",
+            "details": str(e)
+        }
