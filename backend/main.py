@@ -1,15 +1,15 @@
-from fastapi import FastAPI, Query
+from fastapi import FastAPI
 from selector import auto_best_xi
 
-app = FastAPI()
+app = FastAPI(title="ODI AI Selector")
 
 @app.get("/")
 def root():
-    return {"status": "ok"}
+    return {"status": "ODI AI Selector is running"}
 
 @app.get("/best-xi")
 def best_xi(
-    pitch_type: str = Query("neutral"),
-    opponent: str = Query(None)
+    opponent: str,
+    venue: str
 ):
-    return auto_best_xi(pitch_type=pitch_type, opponent=opponent)
+    return auto_best_xi(opponent=opponent, venue=venue)
