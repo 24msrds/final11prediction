@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from selector import auto_best_xi
+from backend.selector import auto_best_xi
 
 app = FastAPI(title="ODI AI Selector")
 
