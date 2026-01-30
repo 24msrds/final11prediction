@@ -2,142 +2,115 @@ import streamlit as st
 import requests
 import pandas as pd
 
-# -------------------------------------------------
-# API CONFIG
-# -------------------------------------------------
-API = "http://127.0.0.1:8000"
-
-# -------------------------------------------------
-# PLAYER IMAGE MAP
-# -------------------------------------------------
-PLAYER_IMAGES = {
-    "Virat Kohli": "https://img1.hscicdn.com/image/upload/f_auto,t_ds_square_w_80/lsci/db/PICTURES/CMS/316400/316486.png",
-    "Rohit Sharma": "https://img1.hscicdn.com/image/upload/f_auto,t_ds_square_w_80/lsci/db/PICTURES/CMS/316500/316506.png",
-    "Quinton De Kock": "https://img1.hscicdn.com/image/upload/f_auto,t_ds_square_w_80/lsci/db/PICTURES/CMS/321000/321006.png",
-    "Jos Buttler": "https://img1.hscicdn.com/image/upload/f_auto,t_ds_square_w_80/lsci/db/PICTURES/CMS/322000/322003.png",
-    "Babar Azam": "https://img1.hscicdn.com/image/upload/f_auto,t_ds_square_w_80/lsci/db/PICTURES/CMS/316600/316605.png",
-    "Jasprit Bumrah": "https://img1.hscicdn.com/image/upload/f_auto,t_ds_square_w_80/lsci/db/PICTURES/CMS/316700/316705.png",
-    "Mitchell Starc": "https://img1.hscicdn.com/image/upload/f_auto,t_ds_square_w_80/lsci/db/PICTURES/CMS/316800/316803.png",
-    "Adam Zampa": "https://img1.hscicdn.com/image/upload/f_auto,t_ds_square_w_80/lsci/db/PICTURES/CMS/316900/316903.png",
-    "Kane Williamson": "https://img1.hscicdn.com/image/upload/f_auto,t_ds_square_w_80/lsci/db/PICTURES/CMS/316300/316306.png",
-    "KL Rahul": "https://img1.hscicdn.com/image/upload/f_auto,t_ds_square_w_80/lsci/db/PICTURES/CMS/316800/316846.png",
-}
-
-PLACEHOLDER_IMG = "https://via.placeholder.com/80?text=Player"
-
-# -------------------------------------------------
+# ------------------------------
 # PAGE CONFIG
-# -------------------------------------------------
-st.set_page_config(page_title="ODI AI Selection Analyst", layout="wide")
+# ------------------------------
+st.set_page_config(
+    page_title="ODI AI Final XI Selector",
+    layout="centered"
+)
 
-st.title("🏏 ODI AI Selection Analyst")
-st.caption("AI-assisted team selection • balance • leadership • conditions")
+st.title("🏏 ODI AI Final XI Selector")
+st.caption("AI-powered Best XI selection using ODI player statistics")
 
-# -------------------------------------------------
-# SIDEBAR
-# -------------------------------------------------
-st.sidebar.header("Match Context")
+# ------------------------------
+# BACKEND CONFIG (RENDER)
+# ------------------------------
+API_BASE = "https://final11prediction.onrender.com"
 
-pitch = st.sidebar.selectbox("Pitch Type", ["neutral", "spin", "pace"])
+# ------------------------------
+# SIDEBAR INPUTS
+# ------------------------------
+st.sidebar.header("Match Conditions")
 
-opponent = st.sidebar.selectbox(
+pitch_type = st.sidebar.selectbox(
+    "Pitch Type",
+    ["neutral", "batting", "bowling"]
+)
+
+opponent = st.sidebar.text_input(
     "Opponent Team",
-    [
-        "India", "Australia", "England", "Pakistan",
-        "New Zealand", "South Africa",
-        "Sri Lanka", "Bangladesh", "Netherlands"
-    ]
+    placeholder="e.g. Pakistan"
 )
 
-venue = st.sidebar.selectbox(
+venue = st.sidebar.text_input(
     "Venue",
-    [
-        "Wankhede Stadium, India",
-        "Eden Gardens, India",
-        "MCG, Australia",
-        "Lord's, England",
-        "Wanderers, South Africa",
-        "R Premadasa Stadium, Sri Lanka",
-        "Gaddafi Stadium, Pakistan",
-        "Hagley Oval, New Zealand"
-    ]
+    placeholder="e.g. Lahore"
 )
 
-# -------------------------------------------------
-# RUN ANALYSIS
-# -------------------------------------------------
-if st.button("🧠 Analyze Best XI"):
-    with st.spinner("Analyzing team balance..."):
-        res = requests.get(
-            f"{API}/best-xi",
-            params={
-                "pitch_type": pitch,
-                "opponent": opponent,
-                "venue": venue
-            }
-        )
+# ------------------------------
+# HEALTH CHECK
+# ------------------------------
+with st.expander("🔍 Backend Status"):
+    try:
+        health = requests.get(f"{API_BASE}/", timeout=10)
+        if health.status_code == 200:
+            st.success("Backend is running ✅")
+            st.json(health.json())
+        else:
+            st.warning("Backend reachable but returned unexpected response")
+    except Exception as e:
+        st.error("Backend not reachable ❌")
+        st.code(str(e))
 
-        if res.status_code != 200:
-            st.error("Backend error")
-            st.stop()
+# ------------------------------
+# FETCH BEST XI
+# ------------------------------
+st.markdown("---")
 
-        df = pd.DataFrame(res.json())
+if st.button("⚡ Generate Best XI"):
+    if opponent.strip() == "" or venue.strip() == "":
+        st.warning("Please enter both opponent and venue.")
+    else:
+        with st.spinner("Selecting Best XI using AI logic..."):
+            try:
+                response = requests.get(
+                    f"{API_BASE}/best-xi",
+                    params={
+                        "pitch_type": pitch_type,
+                        "opponent": opponent,
+                        "venue": venue
+                    },
+                    timeout=30
+                )
 
-    df.index = range(1, len(df) + 1)
+                if response.status_code == 200:
+                    data = response.json()
 
-    # -------------------------------------------------
-    # DISPLAY PLAYING XI (IMAGE FIX)
-    # -------------------------------------------------
-    st.subheader("🏆 Final Playing XI")
+                    st.success("✅ Best XI Generated")
 
-    for idx, row in df.iterrows():
-        cols = st.columns([0.8, 2.8, 1.5, 1.5, 1, 1, 1])
+                    # ------------------------------
+                    # DISPLAY RESULT
+                    # ------------------------------
+                    if isinstance(data, list):
+                        df = pd.DataFrame(data)
+                        st.subheader("🏏 Selected Playing XI")
+                        st.dataframe(df, use_container_width=True)
 
-        # ✅ IMAGE FIX (USE GET, NOT MAP)
-        img = PLAYER_IMAGES.get(row["player"], PLACEHOLDER_IMG)
-        cols[0].image(img, width=60)
+                    elif isinstance(data, dict):
+                        st.subheader("🏏 Selected Playing XI")
+                        st.json(data)
 
-        name = f"**{row['player']}**"
-        if row["captain"]:
-            name += " 👑"
-        elif row["vice_captain"]:
-            name += " ⭐"
-        if row["role"] == "wicketkeeper":
-            name += " 🧤"
+                    else:
+                        st.write(data)
 
-        cols[1].markdown(name)
-        cols[2].write(row["role"].title())
-        cols[3].write(row["country"])
-        cols[4].write(row["runs"])
-        cols[5].write(row["sr"])
-        cols[6].write(row["wickets"])
+                else:
+                    st.error("❌ Backend returned an error")
+                    st.code(f"Status Code: {response.status_code}")
+                    st.text(response.text)
 
-    # -------------------------------------------------
-    # TEAM STABILITY REPORT
-    # -------------------------------------------------
-    st.subheader("⚖ Team Stability Report")
+            except requests.exceptions.Timeout:
+                st.error("⏳ Backend timeout. Please try again.")
+            except requests.exceptions.ConnectionError:
+                st.error("🔌 Unable to connect to backend.")
+            except Exception as e:
+                st.error("Unexpected error occurred")
+                st.code(str(e))
 
-    role_counts = df["role"].value_counts()
-    bat_count = role_counts.get("batsman", 0) + role_counts.get("wicketkeeper", 0)
-    ar_count = role_counts.get("allrounder", 0)
-    bowl_count = role_counts.get("bowler", 0)
-
-    st.success("🎯 Strong bowling attack" if bowl_count >= 3 else "🎯 Bowling depth moderate")
-    st.success("🔄 Good all-rounder balance" if ar_count >= 2 else "🔄 Limited all-rounders")
-    st.warning("🏏 Moderate batting depth" if bat_count < 6 else "🏏 Strong batting depth")
-
-    captain = df[df["captain"]]["player"].iloc[0]
-
-    st.subheader("📝 Selector Insights")
-    st.info(
-        f"""
-        ✔ XI is balanced  
-        ✔ Bowling options validated using wickets  
-        ✔ Opposition bias correctly filtered  
-        ✔ Venue adaptability considered  
-        ✔ Captaincy candidate: **{captain}**
-        """
-    )
-
-st.divider()
-st.caption("Built for ODI analytics • selection logic inspired by real selectors")
+# ------------------------------
+# FOOTER
+# ------------------------------
+st.markdown("---")
+st.caption(
+    "Built with FastAPI + Streamlit | Deployed on Render & Streamlit Cloud"
+)
